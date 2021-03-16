@@ -1,0 +1,12 @@
+*.pyc
+*.swp
+.vscode
+.DS_Store
+*.tar
+*.pkl
+data
+log
+models
+outputs
+events.*
+*.json
