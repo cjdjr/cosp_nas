@@ -33,10 +33,6 @@ from .reinforce_baselines import NoBaseline, WarmupBaseline, ExponentialBaseline
 from .subnet_dataset import SubnetDataset
 
 
-def set_decode_type(model, decode_type):
-    if isinstance(model, DataParallel) or isinstance(model, DistributedDataParallel):
-        model = model.module
-    model.set_decode_type(decode_type)
 
 class COSPSearcher(object):
 
@@ -157,6 +153,7 @@ class COSPSearcher(object):
         if step % int(self.args.log_step) == 0:
             log_values(cost_1, grad_norms, epoch, batch_id, step,
                     log_likelihood, reinforce_loss, None, self.tb_logger, self.args)
+            self.logger.info("Epoch = {}  , Step = {}".format(epoch,step))
 
     def train_epoch(self, model, optimizer, baseline, lr_scheduler, epoch):
 
@@ -211,13 +208,13 @@ class COSPSearcher(object):
 
         self.args.eval_model = os.path.join(args.save_dir, 'epoch-{}.pt'.format(epoch))
 
-        # cost_1_min,cost_1_mean,cost_5_min,cost_5_mean = validate(model, True)
+        cost_1_min,cost_1_mean,cost_5_min,cost_5_mean = validate(model, True)
 
-        # if not self.args.no_tensorboard:
-        #     tb_logger.log_value('cost_1_min', cost_1_min, step)
-        #     tb_logger.log_value('cost_1_mean', cost_1_mean, step)
-        #     tb_logger.log_value('cost_5_min', cost_5_min, step)
-        #     tb_logger.log_value('cost_5_mean', cost_5_mean, step)
+        if not self.args.no_tensorboard:
+            tb_logger.log_value('cost_1_min', cost_1_min, step)
+            tb_logger.log_value('cost_1_mean', cost_1_mean, step)
+            tb_logger.log_value('cost_5_min', cost_5_min, step)
+            tb_logger.log_value('cost_5_mean', cost_5_mean, step)
 
         baseline.epoch_callback(model, epoch)
 
@@ -251,6 +248,7 @@ class COSPSearcher(object):
         model = AttentionModel(
         self.args.embedding_dim,
         self.args.hidden_dim,
+        self.args.feed_forward_hidden,
         self.supernet,
         n_encode_layers=self.args.n_encode_layers,
         mask_inner=True,

@@ -116,7 +116,7 @@ class EvolutionSearcher(object):
             print('flops limit exceed')
             return False
 
-        info['err'] = get_cand_err(self.model, cand, self.args)
+        info['err'] = get_cand_err(self.model, cand)
 
         self.cnt += 1
         if self.cnt % 5 == 0:

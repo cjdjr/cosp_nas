@@ -5,8 +5,11 @@ import tqdm
 
 assert torch.cuda.is_available()
 
-# train_dataprovider, val_dataprovider = None, None
+train_batch_size, test_batch_size, max_train_iters, max_test_iters = None, None, None, None
 
+def evaluator_setting(a,b,c,d):
+    global train_batch_size, test_batch_size, max_train_iters, max_test_iters
+    train_batch_size, test_batch_size, max_train_iters, max_test_iters = a, b, c, d
 
 def accuracy(output, target, topk=(1,)):
     maxk = max(topk)
@@ -31,23 +34,22 @@ def no_grad_wrapper(func):
 
 
 @no_grad_wrapper
-def get_cand_err(model, cand, args):
-    # global train_dataprovider, val_dataprovider
+def get_cand_err(model, cand):
+    global train_batch_size, test_batch_size, max_train_iters, max_test_iters
+    assert train_batch_size != None, "Please set the evaluator first of all !"
 
-    # if train_dataprovider is None:
     use_gpu = True
     train_dataprovider = get_train_dataprovider(
-        args.train_batch_size, use_gpu=use_gpu, num_workers=8)
+        train_batch_size, use_gpu=use_gpu, num_workers=8)
     val_dataprovider = get_val_dataprovider(
-        args.test_batch_size, use_gpu=use_gpu, num_workers=8)
+        test_batch_size, use_gpu=use_gpu, num_workers=8)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
 
-    max_train_iters = args.max_train_iters
-    max_test_iters = args.max_test_iters
+
 
     print('clear bn statics....')
     for m in model.modules():
@@ -108,7 +110,7 @@ def get_cand_err(model, cand, args):
 
     return top1, top5
 
-def get_costs(model, input, pi, args):
+def get_costs(model, input, pi):
     """
     :param model: supernet
     :param input: (batch_size, graph_size, node_dim) 
@@ -123,7 +125,7 @@ def get_costs(model, input, pi, args):
     for i in range(input.size(0)):
         cand = list(map(int,input[i][pi[i]][:,1].cpu().tolist()))
         # print("cand = {} ".format(cand))
-        cost_1[i] , cost_5[i] = get_cand_err(model,cand,args,input.device)
+        cost_1[i] , cost_5[i] = get_cand_err(model,cand)
 
     return cost_1, cost_5, None
     

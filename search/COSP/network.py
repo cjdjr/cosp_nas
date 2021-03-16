@@ -6,66 +6,20 @@ from cosp_nas.supernet.blocks import Shufflenet, Shuffle_Xception
 import math
 from typing import NamedTuple
 import numpy as np
-from torch.utils.checkpoint import checkpoint
+
 import sys
 sys.path.append("..")
-from utils import CachedLookup, compute_in_batches, get_inner_model
+
+from cosp_nas.utils import CachedLookup, compute_in_batches, get_inner_model
 
 from cosp_nas.evaluator import get_costs
-# from cosp_nas.utils import get_cand_flops
 
-def make_state(supernet,input):
-    return Subnet(supernet.n_layer,supernet.n_op,input)
+from .problem import Subnet, make_state
 
 def set_decode_type(model, decode_type):
     if isinstance(model, DataParallel) or isinstance(model, DistributedDataParallel):
         model = model.module
     model.set_decode_type(decode_type)
-
-class Subnet(object):
-    def __init__(self, n_layer, n_op, input):
-        super(Subnet, self).__init__()
-        self.device = input.device
-        # print("device = ",self.device)
-        self.n_layer = n_layer
-        self.n_op = n_op
-        self.batch_size, self.node_num, _ = input.shape
-        # print("batch_size={} node_num={}".format(self.batch_size,self.node_num))
-        self.now = 0
-        self.start = 0
-        self.len = []
-        self.current_node = prev_a = torch.zeros(self.batch_size, 1, dtype=torch.long,device = self.device)
-        i=0
-        while i<self.node_num:
-            j=i
-            while j+1<self.node_num and input[0][j+1][0]==input[0][i][0]:
-                j+=1
-            self.len.append(j-i+1)
-            i=j+1
-        assert(len(self.len)==self.n_layer)
-
-    def update(self,selected):
-        self.current_node=selected[:,None]  # Add dimension for step
-        self.start+=self.len[self.now]
-        self.now +=1
-
-    def get_current_node(self):
-        return self.current_node
-
-    def get_mask(self):
-        mask = torch.ones(self.node_num,device = self.device)
-        # mask = torch.Tensor([1.,1.])
-        # mask = torch.ones(2)
-        # mask = mask.expand(self.batch_size,-1)
-        # mask = torch.randn(self.node_num)
-        mask[self.start:self.start+self.len[self.now]] = 0
-        mask = mask>0
-        # print("mask shape : {} , batch_size : {}".format(mask.shape,self.batch_size))
-        mask = mask.expand(self.batch_size,-1)
-        # while True:
-        #     pass
-        return mask[:,None,:]
-
 
 
 class AttentionModelFixed(NamedTuple):
@@ -96,15 +50,15 @@ class AttentionModel(nn.Module):
     def __init__(self,
                  embedding_dim,
                  hidden_dim,
+                 feed_forward_hidden,
                  supernet,
                  n_encode_layers=2,
                  tanh_clipping=10.,
                  mask_inner=True,
                  mask_logits=True,
                  normalization='batch',
-                 n_heads=8,
-                 checkpoint_encoder=False,
-                 shrink_size=None):
+                 n_heads=8
+                 ):
         super(AttentionModel, self).__init__()
 
         self.embedding_dim = embedding_dim
@@ -120,8 +74,7 @@ class AttentionModel(nn.Module):
 
         self.supernet = supernet
         self.n_heads = n_heads
-        self.checkpoint_encoder = checkpoint_encoder
-        self.shrink_size = shrink_size
+
 
         # Problem specific context parameters (placeholder and step context dimension)
         step_context_dim = embedding_dim  # Embedding of last node
@@ -133,11 +86,12 @@ class AttentionModel(nn.Module):
 
         self.init_embed = nn.Linear(node_dim, embedding_dim)
 
-        self.embedder = GraphAttentionEncoder(
+        self.encoder = GraphAttentionEncoder(
             n_heads=n_heads,
             embed_dim=embedding_dim,
             n_layers=self.n_encode_layers,
-            normalization=normalization
+            normalization=normalization,
+            feed_forward_hidden = feed_forward_hidden
         )
 
         # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
@@ -163,11 +117,10 @@ class AttentionModel(nn.Module):
         # print("one ! ")
         # print(input.shape)
         # print(input.device)
-        if self.checkpoint_encoder and self.training:  # Only checkpoint if we need gradients
-            embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
-        else:
-            embeddings, _ = self.embedder(self._init_embed(input))
-        _log_p, pi = self._inner(input, embeddings)
+
+        embeddings, _ = self.encoder(self.init_embed(input))
+
+        _log_p, pi = self._decode(input, embeddings)
         # print(args.device," : ",pi)
         # while True:
         #     pass 
@@ -177,7 +130,7 @@ class AttentionModel(nn.Module):
         # print("_log_p shape : ",_log_p.shape)
         # print("pi shape : ",pi.shape)
 
-        cost_1, cost_5, mask = get_costs(self.supernet, input, pi, args)
+        cost_1, cost_5, mask = get_costs(self.supernet, input, pi)
         # print("cost's device : ",cost.device)
         # return cost
         # print("cost's shape is  = ",cost_1.shape)
@@ -188,45 +141,6 @@ class AttentionModel(nn.Module):
             return cost_1, cost_5, ll, pi
 
         return cost_1, cost_5, ll
-
-    def beam_search(self, *args, **kwargs):
-        return self.supernet.beam_search(*args, **kwargs, model=self)
-
-    def precompute_fixed(self, input):
-        embeddings, _ = self.embedder(self._init_embed(input))
-        # Use a CachedLookup such that if we repeatedly index this object with the same index we only need to do
-        # the lookup once... this is the case if all elements in the batch have maximum batch size
-        return CachedLookup(self._precompute(embeddings))
-
-    def propose_expansions(self, beam, fixed, expand_size=None, normalize=False, max_calc_batch_size=4096):
-        # First dim = batch_size * cur_beam_size
-        log_p_topk, ind_topk = compute_in_batches(
-            lambda b: self._get_log_p_topk(fixed[b.ids], b.state, k=expand_size, normalize=normalize),
-            max_calc_batch_size, beam, n=beam.size()
-        )
-
-        assert log_p_topk.size(1) == 1, "Can only have single step"
-        # This will broadcast, calculate log_p (score) of expansions
-        score_expand = beam.score[:, None] + log_p_topk[:, 0, :]
-
-        # We flatten the action as we need to filter and this cannot be done in 2d
-        flat_action = ind_topk.view(-1)
-        flat_score = score_expand.view(-1)
-        flat_feas = flat_score > -1e10  # != -math.inf triggers
-
-        # Parent is row idx of ind_topk, can be found by enumerating elements and dividing by number of columns
-        flat_parent = torch.arange(flat_action.size(-1), out=flat_action.new()) / ind_topk.size(-1)
-
-        # Filter infeasible
-        feas_ind_2d = torch.nonzero(flat_feas)
-
-        if len(feas_ind_2d) == 0:
-            # Too bad, no feasible expansions at all :(
-            return None, None, None
-
-        feas_ind = feas_ind_2d[:, 0]
-
-        return flat_parent[feas_ind], flat_action[feas_ind], flat_score[feas_ind]
 
     def _calc_log_likelihood(self, _log_p, a, mask):
 
@@ -242,11 +156,8 @@ class AttentionModel(nn.Module):
         # Calculate log_likelihood
         return log_p.sum(1)
 
-    def _init_embed(self, input):
 
-        return self.init_embed(input)
-
-    def _inner(self, input, embeddings):
+    def _decode(self, input, embeddings):
 
         outputs = []
         sequences = []
@@ -261,18 +172,6 @@ class AttentionModel(nn.Module):
         # Perform decoding steps
         for i in range(self.supernet.n_layer):
 
-            # if self.shrink_size is not None:
-            #     unfinished = torch.nonzero(state.get_finished() == 0)
-            #     if len(unfinished) == 0:
-            #         break
-            #     unfinished = unfinished[:, 0]
-            #     # Check if we can shrink by at least shrink_size and if this leaves at least 16
-            #     # (otherwise batch norm will not work well and it is inefficient anyway)
-            #     if 16 <= len(unfinished) <= state.ids.size(0) - self.shrink_size:
-            #         # Filter states
-            #         state = state[unfinished]
-            #         fixed = fixed[unfinished]
-
             log_p, mask = self._get_log_p(fixed, state)
 
             # Select the indices of the next nodes in the sequences, result (batch_size) long
@@ -280,16 +179,6 @@ class AttentionModel(nn.Module):
 
             state.update(selected)
 
-            # Now make log_p, selected desired output size by 'unshrinking'
-            # if self.shrink_size is not None and state.ids.size(0) < batch_size:
-            #     log_p_, selected_ = log_p, selected
-            #     log_p = log_p_.new_zeros(batch_size, *log_p_.size()[1:])
-            #     selected = selected_.new_zeros(batch_size)
-
-            #     log_p[state.ids[:, 0]] = log_p_
-            #     selected[state.ids[:, 0]] = selected_
-
-            # Collect output of step
             outputs.append(log_p[:, 0, :])
             sequences.append(selected)
 
@@ -297,19 +186,6 @@ class AttentionModel(nn.Module):
         # Collected lists, return Tensor
         return torch.stack(outputs, 1), torch.stack(sequences, 1)
 
-    def sample_many(self, input, batch_rep=1, iter_rep=1):
-        """
-        :param input: (batch_size, graph_size, node_dim) input node features
-        :return:
-        """
-        # Bit ugly but we need to pass the embeddings as well.
-        # Making a tuple will not work with the problem.get_cost function
-        return sample_many(
-            lambda input: self._inner(*input),  # Need to unpack tuple into arguments
-            lambda input, pi: self.supernet.get_costs(input[0], pi),  # Don't need embeddings as input to get_costs
-            (input, self.embedder(self._init_embed(input))[0]),  # Pack input with embeddings (additional input)
-            batch_rep, iter_rep
-        )
 
     def _select_node(self, probs, mask):
 
@@ -352,19 +228,6 @@ class AttentionModel(nn.Module):
         )
         return AttentionModelFixed(embeddings, fixed_context, *fixed_attention_node_data)
 
-    def _get_log_p_topk(self, fixed, state, k=None, normalize=True):
-        log_p, _ = self._get_log_p(fixed, state, normalize=normalize)
-
-        # Return topk
-        if k is not None and k < log_p.size(-1):
-            return log_p.topk(k, -1)
-
-        # Return all, note different from torch.topk this does not give error if less than k elements along dim
-        return (
-            log_p,
-            torch.arange(log_p.size(-1), device=log_p.device, dtype=torch.int64).repeat(log_p.size(0), 1)[:, None, :]
-        )
-
     def _get_log_p(self, fixed, state, normalize=True):
 
         # Compute query = context node embedding
@@ -406,20 +269,6 @@ class AttentionModel(nn.Module):
                 1,
                 current_node[:, :, None].expand(batch_size, 1, embeddings.size(-1))
             )
-        # More than one step, assume always starting with first
-        # embeddings_per_step = embeddings.gather(
-        #     1,
-        #     current_node[:, 1:, None].expand(batch_size, num_steps - 1, embeddings.size(-1))
-        # )
-        # return torch.cat((
-        #     # First step placeholder, cat in dim 1 (time steps)
-        #     self.W_placeholder[None, None, :].expand(batch_size, 1, self.W_placeholder.size(-1)),
-        #     # Second step, concatenate embedding of first with embedding of current/previous (in dim 2, context dim)
-        #     torch.cat((
-        #         embeddings_per_step[:, 0:1, :].expand(batch_size, num_steps - 1, embeddings.size(-1)),
-        #         embeddings_per_step
-        #     ), 2)
-        # ), 1)
 
     def _one_to_many_logits(self, query, glimpse_K, glimpse_V, logit_K, mask):
 

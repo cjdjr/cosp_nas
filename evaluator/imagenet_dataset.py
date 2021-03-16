@@ -12,6 +12,7 @@ from PIL import Image
 import tqdm
 
 from cosp_nas.utils import set_random_seed
+from .tester import evaluator_setting
 
 class OpencvResize(object):
 
@@ -108,6 +109,8 @@ def init_evaluator(train_iters, train_batch_size, val_iters, val_batch_size, eva
 
     train_dataset = torch.utils.data.random_split(train_dataset,[train_iters*train_batch_size,len(train_dataset)-train_iters*train_batch_size])[0]
     valid_dataset = torch.utils.data.random_split(valid_dataset,[val_iters*val_batch_size,len(valid_dataset)-val_iters*val_batch_size])[0]
+
+    evaluator_setting(train_batch_size, val_batch_size, train_iters, val_iters)
 
 def main():
     torch.manual_seed(0)
