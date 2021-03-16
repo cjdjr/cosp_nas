@@ -58,12 +58,12 @@ class DataIterator(object):
             _, data = next(self.iterator)
         return data[0], data[1]
 
-train_dir = '/data1/wangmr/ILSVRC2012_img_train'
-val_dir = '/data1/wangmr/ILSVRC2012_img_val'
+train_dir = '../data/train'
+val_dir = '../data/val'
 
 assert os.path.exists(train_dir)
 assert os.path.exists(val_dir)
-
+train_dataset， valid_dataset
 train_dataset = datasets.ImageFolder(
     train_dir,
     transforms.Compose([
