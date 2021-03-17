@@ -107,7 +107,7 @@ class AttentionModel(nn.Module):
         if temp is not None:  # Do not change temperature if not provided
             self.temp = temp
 
-    def forward(self, input, args,return_pi=False):
+    def forward(self, input,return_pi=False):
         """
         :param input: (batch_size, graph_size, node_dim) input node features or dictionary with multiple tensors
         :param return_pi: whether to return the output sequences, this is optional as it is not compatible with
@@ -117,7 +117,9 @@ class AttentionModel(nn.Module):
         # print("one ! ")
         # print(input.shape)
         # print(input.device)
-
+        # print("network")
+        # from IPython import embed
+        # embed()
         embeddings, _ = self.encoder(self.init_embed(input))
 
         _log_p, pi = self._decode(input, embeddings)
@@ -162,7 +164,7 @@ class AttentionModel(nn.Module):
         outputs = []
         sequences = []
         # print("inner!")
-        state = make_state(self.supernet,input)
+        state = make_state(get_inner_model(self.supernet),input)
         # print("state = ",state)
         # Compute keys, values for the glimpse and keys for the logits once as they can be reused in every step
         fixed = self._precompute(embeddings)
@@ -170,7 +172,7 @@ class AttentionModel(nn.Module):
         batch_size = state.batch_size
 
         # Perform decoding steps
-        for i in range(self.supernet.n_layer):
+        for i in range(get_inner_model(self.supernet).n_layer):
 
             log_p, mask = self._get_log_p(fixed, state)
 

@@ -64,31 +64,22 @@ class COSPSearcher(object):
             model.eval()
             set_decode_type(model, "sampling")
             cost_1, cost_5, _ , pi = model(input, return_pi=True)
+            from IPython import embed
+            embed()
             cost_1 = cost_1[:,None]
             # cost_1_min = cost_1.min()
             pi = pi.float()
             info = torch.cat((cost_1,pi),dim=1)
-            cost_1_sum = cost_1.sum()
+            cost_1_mean = cost_1.mean()
             cost_5_min = cost_5.min()
-            cost_5_sum = cost_5.sum()
+            cost_5_mean = cost_5.mean()
 
-        # cost_1_min = gather_min(cost_1_min)
-        gather_info = [torch.ones_like(info) for _ in range(dist.get_world_size())]
-        dist.all_gather(gather_info, info)
-        gather_info = torch.cat(tuple(gather_info),dim=0)
-        cost_1_min_id = torch.argmin(gather_info[:,0]).item()
-        cost_1_min = gather_info[cost_1_min_id][0].item()
-        cand = tuple([x%4 for x in map(int,gather_info[cost_1_min_id][1:].cpu().numpy())])
-        cost_1_mean = gather_sum(cost_1_sum)/args.val_sample
-        cost_5_min = gather_min(cost_5_min)
-        cost_5_mean = gather_sum(cost_5_sum)/args.val_sample
-        if args.local_rank == 0:
-            print("cost_1_min = {} cost_1_mean = {} cost_5_min={} cost_5_mean={} \n cand : {}".format(cost_1_min,cost_1_mean,cost_5_min,cost_5_mean,cand))
-            if log:
-                filename, _ = os.path.splitext(args.eval_model)
-                filename = filename + ".log"
-                with open(filename,'w') as f:
-                    f.write("cost_1_min = {} cost_1_mean = {} cost_5_min={} cost_5_mean={} \n cand : {}".format(cost_1_min,cost_1_mean,cost_5_min,cost_5_mean,cand))
+
+        cost_1_min_id = torch.argmin(info[:,0]).item()
+        cost_1_min = info[cost_1_min_id][0].item()
+        cand = tuple([x%4 for x in map(int,info[cost_1_min_id][1:].cpu().numpy())])
+
+        self.logger.info("cost_1_min = {} cost_1_mean = {} cost_5_min={} cost_5_mean={} \n cand : {}".format(cost_1_min,cost_1_mean,cost_5_min,cost_5_mean,cand))
 
         # cannot make the seed same in all epoch
         self.args.seed += 1            
@@ -119,10 +110,8 @@ class COSPSearcher(object):
         # return 
         # Evaluate model, get costs and log probabilities
 
-        # cost_1, cost_5, log_likelihood= model(x)
-        cost_1 = torch.tensor([0.])
-        cost_5 = torch.tensor([0.])
-        log_likelihood = torch.tensor([0.])
+        cost_1, cost_5, log_likelihood= model(x)
+
 
         # global info
         # for i in range(cost_1.size(0)):
@@ -206,15 +195,15 @@ class COSPSearcher(object):
             os.path.join(self.args.save_dir, 'epoch-{}.pt'.format(epoch))
         )
 
-        self.args.eval_model = os.path.join(args.save_dir, 'epoch-{}.pt'.format(epoch))
+        self.args.eval_model = os.path.join(self.args.save_dir, 'epoch-{}.pt'.format(epoch))
 
-        cost_1_min,cost_1_mean,cost_5_min,cost_5_mean = validate(model, True)
+        cost_1_min,cost_1_mean,cost_5_min,cost_5_mean = self.validate(model, True)
 
         if not self.args.no_tensorboard:
-            tb_logger.log_value('cost_1_min', cost_1_min, step)
-            tb_logger.log_value('cost_1_mean', cost_1_mean, step)
-            tb_logger.log_value('cost_5_min', cost_5_min, step)
-            tb_logger.log_value('cost_5_mean', cost_5_mean, step)
+            self.tb_logger.log_value('cost_1_min', cost_1_min, step)
+            self.tb_logger.log_value('cost_1_mean', cost_1_mean, step)
+            self.tb_logger.log_value('cost_5_min', cost_5_min, step)
+            self.tb_logger.log_value('cost_5_mean', cost_5_mean, step)
 
         baseline.epoch_callback(model, epoch)
 
@@ -223,6 +212,9 @@ class COSPSearcher(object):
 
     def search(self):
 
+        # print("search")
+        # from IPython import embed
+        # embed()
         self.check_tblogger()
 
         with open(os.path.join(self.args.save_dir, "args.json"), 'w') as f:
@@ -255,8 +247,6 @@ class COSPSearcher(object):
         mask_logits=True,
         normalization=self.args.normalization,
         tanh_clipping=self.args.tanh_clipping,
-        checkpoint_encoder=self.args.checkpoint_encoder,
-        shrink_size=self.args.shrink_size
         ).to(self.args.device)
         model = torch.nn.DataParallel(model).cuda()
 
@@ -316,7 +306,7 @@ class COSPSearcher(object):
 
         if self.args.eval_only:
             self.args.eval_model = self.args.load_path
-            validate(model, True)
+            self.validate(model, True)
         else:
             for epoch in range(self.args.epoch_start, self.args.epoch_start + self.args.n_epochs):
                 self.train_epoch(

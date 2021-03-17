@@ -10,10 +10,7 @@ import tarfile
 import PIL
 from PIL import Image
 import tqdm
-
 from cosp_nas.utils import set_random_seed
-from .tester import evaluator_setting
-
 class OpencvResize(object):
 
     def __init__(self, size=256):
@@ -58,31 +55,16 @@ class DataIterator(object):
             _, data = next(self.iterator)
         return data[0], data[1]
 
-train_dir = '../data/train'
-val_dir = '../data/val'
+
+train_dir = os.getcwd()+'/data/train'
+val_dir = os.getcwd()+'/data/val'
 
 assert os.path.exists(train_dir)
 assert os.path.exists(val_dir)
-train_dataset， valid_dataset
-train_dataset = datasets.ImageFolder(
-    train_dir,
-    transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
-        transforms.RandomHorizontalFlip(0.5),
-        ToBGRTensor(),
-    ])
-)
 
+# train_dataset, valid_dataset = None, None
+# train_bs, test_bs, train_it, test_it = None, None, None, None
 
-valid_dataset = datasets.ImageFolder(
-    val_dir,
-    transforms.Compose([
-        OpencvResize(256),
-        transforms.CenterCrop(224),
-        ToBGRTensor(),
-    ])
-)
 
 
 def get_train_dataprovider(batch_size, *, num_workers, use_gpu):
@@ -102,15 +84,52 @@ def get_val_dataprovider(batch_size, *, num_workers, use_gpu):
     return val_dataprovider
 
 def init_evaluator(train_iters, train_batch_size, val_iters, val_batch_size, evaluator_seed = 0):
-    global train_dataset,valid_dataset
+    # global train_dataset,valid_dataset
+    # global train_bs, test_bs, train_it, test_it
+
+    # print(train_iters, train_batch_size, val_iters, val_batch_size, evaluator_seed)
 
     # fix the evaluator
     set_random_seed(evaluator_seed)
 
+    train_dataset = datasets.ImageFolder(
+    train_dir,
+    transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
+        transforms.RandomHorizontalFlip(0.5),
+        ToBGRTensor(),
+    ])
+    )
+    valid_dataset = datasets.ImageFolder(
+        val_dir,
+        transforms.Compose([
+            OpencvResize(256),
+            transforms.CenterCrop(224),
+            ToBGRTensor(),
+        ])
+    )
     train_dataset = torch.utils.data.random_split(train_dataset,[train_iters*train_batch_size,len(train_dataset)-train_iters*train_batch_size])[0]
     valid_dataset = torch.utils.data.random_split(valid_dataset,[val_iters*val_batch_size,len(valid_dataset)-val_iters*val_batch_size])[0]
 
-    evaluator_setting(train_batch_size, val_batch_size, train_iters, val_iters)
+    set_value('train_dataset',train_dataset)
+    set_value('valid_dataset',valid_dataset)
+    set_value('train_batch_size',train_batch_size)
+    set_value('test_batch_size',val_batch_size)
+    set_value('max_train_iters',train_iters)
+    set_value('max_test_iters',val_iters)
+
+    # train_bs, test_bs, train_it, test_it = train_batch_size, val_batch_size, train_iters, val_iters
+
+    # print("test ",train_bs, test_bs, train_it, test_it)
+
+# def get_info():
+#     global train_bs, test_bs, train_it, test_it
+#     # print("before ",train_bs, test_bs, train_it, test_it)
+#     train_batch_size, test_batch_size, max_train_iters, max_test_iters = train_bs, test_bs, train_it, test_it
+#     print("test test ",train_batch_size, test_batch_size, max_train_iters, max_test_iters)
+#     return train_batch_size, test_batch_size, max_train_iters, max_test_iters
+
 
 def main():
     torch.manual_seed(0)

@@ -12,6 +12,9 @@ class ShuffleNetV2_OneShot(nn.Module):
 
         self.stage_repeats = [4, 4, 8, 4]
         self.stage_out_channels = [-1, 16, 64, 160, 320, 640, 1024]
+        
+        self.n_layer = 20
+        self.n_op = 4
 
         # building first layer
         input_channel = self.stage_out_channels[1]

@@ -3,7 +3,8 @@ import torch.multiprocessing as mp
 import torch
 import random
 import numpy as np
-
+from playground1 import fun1,get
+from playground2 import work
 from multiprocessing import Process
 
 def f(rank):
@@ -35,16 +36,10 @@ def eval():
     print(random.random())
     print(random.random())
 
+
+
 if __name__ == '__main__':
-    set_random_seed(0)
-    print(random.random())
-    print(random.random())
-    eval()
-    # set_random_seed(1)
-    # print(random.random())
-    # print(random.random())
-    # set_random_seed(0)
-    print(random.random())
-    print(random.random())
-    eval()
+    fun1(1,2)
+    work()
+
 

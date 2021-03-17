@@ -30,7 +30,11 @@ print = functools.partial(print, flush=True)
 
 from utils import torch_load_cpu, get_inner_model, set_random_seed
 from supernet.network import ShuffleNetV2_OneShot
-from evaluator.imagenet_dataset import init_evaluator
+
+from cosp_nas.evaluator import init_evaluator
+
+
+
 # from reinforce_baselines import NoBaseline, RolloutBaseline, WarmupBaseline, CriticBaseline, ExponentialBaseline
 # from train import train_epoch, validate
 # from subnet_dataset import SubnetDataset
@@ -53,12 +57,10 @@ def get_args():
     parser.add_argument('--evaluator_seed', type=int, default=0)
 
     # Data
-    parser.add_argument('--batch_size', type=int, default=16, help='Number of instances per batch during training')
-    parser.add_argument('--epoch_size', type=int, default=128, help='Number of instances per epoch during training')
-    parser.add_argument('--val_size', type=int, default=100,
-                        help='Number of instances used for reporting validation performance')
-    parser.add_argument('--val_dataset', type=str, default=None, help='Dataset file to use for validation')
-    parser.add_argument('--val_sample', type=int, default=48,
+    parser.add_argument('--batch_size', type=int, default=8, help='Number of instances per batch during training')
+    parser.add_argument('--epoch_size', type=int, default=64, help='Number of instances per epoch during training')
+
+    parser.add_argument('--val_sample', type=int, default=16,
                         help='Number of instances used for reporting validation performance')
     
 
@@ -90,7 +92,7 @@ def get_args():
     parser.add_argument('--eval_only', action='store_true', help='Set this value to only evaluate model')
     parser.add_argument('--n_epochs', type=int, default=100, help='The number of epochs to train')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed to use')
-    parser.add_argument('--eval_seed', type=int, type=int,default=0, help='Random seed used in validate')
+    parser.add_argument('--eval_seed', type=int, default=0, help='Random seed used in validate')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='Maximum L2 norm for gradient clipping, default 1.0 (0 to disable clipping)')
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
@@ -172,6 +174,14 @@ def main():
         return
 
     init_evaluator(args.max_train_iters,args.train_batch_size,args.max_test_iters,args.test_batch_size,args.evaluator_seed)
+
+    # print("run.py")
+    # from IPython import embed
+    # embed()
+    # get_cand_err(None,None)
+
+    # print(get_info())
+    # return 
     t = time.time()
 
     searcher.search()
