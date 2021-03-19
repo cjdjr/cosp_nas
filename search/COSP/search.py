@@ -64,8 +64,6 @@ class COSPSearcher(object):
             model.eval()
             set_decode_type(model, "sampling")
             cost_1, cost_5, _ , pi = model(input, return_pi=True)
-            from IPython import embed
-            embed()
             cost_1 = cost_1[:,None]
             # cost_1_min = cost_1.min()
             pi = pi.float()
